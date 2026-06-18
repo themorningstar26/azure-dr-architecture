@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Zero Downtime DR Architecture — Samarjeet Singh</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0F1117;color:#E2E8F0;font-family:'Inter',sans-serif;line-height:1.7;font-size:15px}
+
+  /* ── HERO ── */
+  .hero{background:linear-gradient(135deg,#0F1117 0%,#1A1F2E 50%,#0F1117 100%);padding:64px 40px 48px;border-bottom:1px solid #1E2535;position:relative;overflow:hidden}
+  .hero::before{content:'';position:absolute;top:-60px;right:-60px;width:400px;height:400px;background:radial-gradient(circle,rgba(99,102,241,.12) 0%,transparent 70%);pointer-events:none}
+  .hero::after{content:'';position:absolute;bottom:-40px;left:10%;width:300px;height:300px;background:radial-gradient(circle,rgba(16,185,129,.08) 0%,transparent 70%);pointer-events:none}
+  .hero-eyebrow{display:inline-flex;align-items:center;gap:8px;background:#1E2535;border:1px solid #2D3748;border-radius:20px;padding:4px 14px;font-size:11px;font-weight:600;color:#818CF8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:20px}
+  .hero-eyebrow span{width:6px;height:6px;border-radius:50%;background:#818CF8;animation:pulse 2s infinite}
+  .hero h1{font-size:38px;font-weight:800;line-height:1.15;margin-bottom:16px;max-width:780px}
+  .hero h1 .accent{color:#6366F1}
+  .hero h1 .accent2{color:#10B981}
+  .hero-meta{display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+  .author-chip{display:flex;align-items:center;gap:8px;background:#1E2535;border:1px solid #2D3748;border-radius:20px;padding:5px 12px 5px 5px}
+  .author-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#6366F1,#8B5CF6);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+  .author-name{font-size:12px;font-weight:600;color:#CBD5E1}
+  .meta-dot{color:#374151;font-size:12px}
+  .meta-tag{font-size:12px;color:#64748B}
+  .hero-stats{display:flex;gap:24px;flex-wrap:wrap}
+  .stat-item{text-align:center}
+  .stat-val{font-size:28px;font-weight:800;color:#6366F1;line-height:1}
+  .stat-lbl{font-size:11px;color:#64748B;margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+  .stat-divider{width:1px;background:#1E2535;align-self:stretch}
+  .hero-desc{font-size:16px;color:#94A3B8;max-width:700px;line-height:1.7;margin-bottom:28px}
+
+  /* ── TABS ── */
+  .tabs-wrap{background:#0F1117;border-bottom:1px solid #1E2535;position:sticky;top:0;z-index:100}
+  .tabs{display:flex;gap:0;overflow-x:auto;padding:0 40px;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:14px 20px;font-size:13px;font-weight:500;color:#64748B;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s;user-select:none}
+  .tab:hover{color:#CBD5E1}
+  .tab.on{color:#6366F1;border-bottom-color:#6366F1}
+
+  /* ── CONTENT ── */
+  .content{max-width:820px;margin:0 auto;padding:40px 40px 80px}
+  .pane{display:none}.pane.on{display:block}
+
+  /* ── INFO / WARN BOXES ── */
+  .info-box{background:#1E2535;border-left:3px solid #6366F1;border-radius:0 8px 8px 0;padding:12px 16px;font-size:13px;color:#94A3B8;margin-bottom:24px;line-height:1.6}
+  .warn-box{background:#1C1410;border-left:3px solid #F59E0B;border-radius:0 8px 8px 0;padding:12px 16px;font-size:13px;color:#D97706;margin-bottom:20px}
+  .ok-box{background:#0D1F16;border-left:3px solid #10B981;border-radius:0 8px 8px 0;padding:12px 16px;font-size:13px;color:#10B981;margin-bottom:20px}
+  .danger-box{background:#1C1014;border-left:3px solid #EF4444;border-radius:0 8px 8px 0;padding:12px 16px;font-size:13px;color:#EF4444;margin-bottom:20px}
+
+  /* ── SECTION LABEL ── */
+  .sec-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin:28px 0 12px;display:flex;align-items:center;gap:10px}
+  .sec-label::after{content:'';flex:1;height:1px;background:#1E2535}
+
+  /* ── CHAIN STEPS (matching screenshot) ── */
+  .chain{display:flex;flex-direction:column;gap:0}
+  .cstep{display:flex;gap:0;position:relative;padding-bottom:8px}
+  .cstep:not(:last-child)::before{content:'';position:absolute;left:16px;top:40px;width:1px;height:calc(100% - 20px);background:#1E2535}
+  .cnum{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;margin-top:6px;border:1px solid}
+  .cn-r{background:#1C0A0A;border-color:#7F1D1D;color:#FCA5A5}
+  .cn-a{background:#1C1208;border-color:#78350F;color:#FCD34D}
+  .cn-b{background:#0A1020;border-color:#1E3A5F;color:#60A5FA}
+  .cn-g{background:#071A10;border-color:#14532D;color:#6EE7B7}
+  .cn-p{background:#120A20;border-color:#3B0764;color:#C4B5FD}
+  .cn-teal{background:#071518;border-color:#134E4A;color:#5EEAD4}
+  .cbody{flex:1;padding:8px 0 20px 16px}
+  .cbadges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid}
+  .bd-time{background:#1C1208;border-color:#78350F;color:#FCD34D}
+  .bd-afd{background:#0A1020;border-color:#1E3A5F;color:#60A5FA}
+  .bd-auto{background:#071A10;border-color:#14532D;color:#6EE7B7}
+  .bd-sql{background:#120A20;border-color:#3B0764;color:#C4B5FD}
+  .bd-run{background:#071518;border-color:#134E4A;color:#5EEAD4}
+  .bd-warn{background:#1C0A0A;border-color:#7F1D1D;color:#FCA5A5}
+  .ctitle{font-size:15px;font-weight:700;color:#F1F5F9;margin-bottom:6px}
+  .cdesc{font-size:13px;color:#94A3B8;margin-bottom:10px;line-height:1.6}
+  pre{background:#141920;border:1px solid #1E2D40;border-radius:8px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;overflow-x:auto;color:#CBD5E1;line-height:1.7;margin:8px 0 4px;position:relative}
+  .lang-label{position:absolute;top:8px;right:12px;font-size:10px;color:#374151;font-family:'Inter',sans-serif;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+  .k{color:#C792EA}.s{color:#C3E88D}.c{color:#4A5568;font-style:italic}.fn{color:#82AAFF}.kw{color:#F07178}.num{color:#F78C6C}.prop{color:#FFCB6B}.op{color:#89DDFF}
+
+  /* ── PERM TABLE ── */
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px}
+  th{text-align:left;padding:8px 10px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#475569;border-bottom:1px solid #1E2535}
+  td{padding:9px 10px;border-bottom:1px solid #141920;vertical-align:top;color:#CBD5E1}
+  td:first-child{font-weight:500;color:#F1F5F9;font-family:'JetBrains Mono',monospace;font-size:12px}
+  tr:hover td{background:#141920}
+
+  /* ── TIMELINE TABLE ── */
+  .tl-table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  .tl-table th{text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #1E2535}
+  .tl-table td{padding:10px 12px;border-bottom:1px solid #141920;font-size:13px;vertical-align:middle}
+  .tl-table tr:last-child td{border-bottom:none}
+  .tl-time{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+  .tl-who{font-size:12px}
+  .chip{display:inline-flex;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+  .chip-auto{background:#071A10;color:#6EE7B7;border:1px solid #14532D}
+  .chip-az{background:#0A1020;color:#60A5FA;border:1px solid #1E3A5F}
+  .chip-none{background:#141920;color:#475569;border:1px solid #1E2535}
+  .chip-done{background:#071518;color:#5EEAD4;border:1px solid #134E4A}
+
+  /* ── GRID CARDS ── */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px}
+  .gc{background:#141920;border:1px solid #1E2535;border-radius:10px;padding:14px 16px}
+  .gc-l{font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;font-weight:600}
+  .gc-v{font-size:14px;font-weight:700;color:#F1F5F9}
+  .gc-sub{font-size:12px;color:#64748B;margin-top:2px}
+
+  /* ── STORY SECTION (intro) ── */
+  .story-block{background:#141920;border:1px solid #1E2535;border-radius:12px;padding:24px;margin-bottom:24px}
+  .story-block p{color:#94A3B8;font-size:14px;margin-bottom:12px}
+  .story-block p:last-child{margin-bottom:0}
+  .story-block .highlight{color:#F1F5F9;font-weight:600}
+  .story-block .quote{color:#6366F1;font-style:italic;font-size:16px;font-weight:500;border-left:3px solid #6366F1;padding-left:16px;margin:16px 0}
+
+  /* ── STACK TAGS ── */
+  .stack{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+  .stag{background:#141920;border:1px solid #1E2535;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;color:#94A3B8;font-family:'JetBrains Mono',monospace}
+
+  /* ── FOOTER ── */
+  .article-footer{background:#141920;border-top:1px solid #1E2535;padding:32px 40px;text-align:center;margin-top:40px}
+  .footer-name{font-size:16px;font-weight:700;color:#F1F5F9;margin-bottom:4px}
+  .footer-sub{font-size:13px;color:#64748B;margin-bottom:16px}
+  .hashtags{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .htag{font-size:12px;color:#6366F1;font-weight:500}
+
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  @media(max-width:600px){
+    .hero{padding:40px 20px 32px}
+    .hero h1{font-size:26px}
+    .content{padding:24px 20px 60px}
+    .tabs{padding:0 16px}
+    .grid2,.grid3{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eyebrow"><span></span>Azure Production Architecture · DevOps Deep Dive</div>
+  <h1>How I Built a 3-Tier App That<br><span class="accent">Heals Itself</span> Across Azure Regions —<br><span class="accent2">Zero Human Intervention</span></h1>
+  <div class="hero-meta">
+    <div class="author-chip">
+      <div class="author-avatar">SS</div>
+      <span class="author-name">Samarjeet Singh</span>
+    </div>
+    <span class="meta-dot">·</span>
+    <span class="meta-tag">DevOps Engineer · HCLTech</span>
+    <span class="meta-dot">·</span>
+    <span class="meta-tag">AZ-104 · AKS · Terraform · GitOps</span>
+  </div>
+  <p class="hero-desc">Active-Passive multi-region disaster recovery on Azure — fully automated failover across AKS, SQL, and Front Door with zero manual steps, built through Terraform and ArgoCD.</p>
+  <div class="hero-stats">
+    <div class="stat-item"><div class="stat-val">&lt;90s</div><div class="stat-lbl">RTO</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat-item"><div class="stat-val">&lt;5s</div><div class="stat-lbl">RPO</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat-item"><div class="stat-val">0</div><div class="stat-lbl">Human steps</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat-item"><div class="stat-val">3</div><div class="stat-lbl">Auto layers</div></div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs-wrap">
+  <div class="tabs" id="tabs">
+    <div class="tab on" onclick="sw(0)">The Problem</div>
+    <div class="tab" onclick="sw(1)">Architecture</div>
+    <div class="tab" onclick="sw(2)">Trigger chain</div>
+    <div class="tab" onclick="sw(3)">The /health trap</div>
+    <div class="tab" onclick="sw(4)">Terraform + CI/CD</div>
+    <div class="tab" onclick="sw(5)">Permissions</div>
+    <div class="tab" onclick="sw(6)">Failback</div>
+    <div class="tab" onclick="sw(7)">What I learned</div>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- PANE 0 — PROBLEM -->
+<div class="pane on" id="p0">
+  <div class="story-block">
+    <p>It's <span class="highlight">3 AM.</span> Your primary region goes down.</p>
+    <p>Your phone blows up. Customers are tweeting. Your SLA clock is ticking.</p>
+    <p>Your on-call engineer scrambles to login. They try to SSH into failing servers. The runbook is 40 steps long. Half the steps assume things that no longer exist.</p>
+    <p>Now imagine a different scenario.</p>
+    <div class="quote">"Failover complete. No action needed."</div>
+    <p>Your app detected the failure at T=0. By T=90 seconds, traffic was already flowing through your DR region in West Europe. Your database was promoted. Your pods were scaled. Your app was serving customers.</p>
+    <p>Your phone rang — but only to <span class="highlight">inform</span> you, not to wake you up and make you fix something.</p>
+    <p>That's what I built. Here's exactly how.</p>
+  </div>
+
+  <div class="sec-label">Why traditional DR fails</div>
+  <div class="grid3">
+    <div class="gc"><div class="gc-l">Problem 1</div><div class="gc-v">Human runbooks</div><div class="gc-sub">40-step docs written by someone who left the company</div></div>
+    <div class="gc"><div class="gc-l">Problem 2</div><div class="gc-v">Untested DR</div><div class="gc-sub">Backup exists. Nobody ran a drill. It doesn't work.</div></div>
+    <div class="gc"><div class="gc-l">Problem 3</div><div class="gc-v">Wrong connection strings</div><div class="gc-sub">App hardcodes primary DB. Failover group promotes DR. App never reconnects.</div></div>
+  </div>
+
+  <div class="sec-label">The solution — 3 automatic layers</div>
+  <div class="grid3">
+    <div class="gc"><div class="gc-l">Layer 1</div><div class="gc-v" style="color:#60A5FA">Azure Front Door</div><div class="gc-sub">Health probes every 30s. 2 failures → DNS flips to DR automatically.</div></div>
+    <div class="gc"><div class="gc-l">Layer 2</div><div class="gc-v" style="color:#C4B5FD">SQL Failover Group</div><div class="gc-sub">Internal heartbeat. 1 min no response → DR replica promoted to primary.</div></div>
+    <div class="gc"><div class="gc-l">Layer 3</div><div class="gc-v" style="color:#6EE7B7">Automation Runbook</div><div class="gc-sub">Managed Identity scales DR pods. No passwords. No pipeline trigger needed.</div></div>
+  </div>
+</div>
+
+<!-- PANE 1 — ARCHITECTURE -->
+<div class="pane" id="p1">
+  <div class="info-box">Active-Passive multi-region — Primary at full capacity, DR always warm at minimum nodes. Identical infrastructure in both regions by construction (same Terraform modules, different tfvars).</div>
+
+  <div class="sec-label">Region layout</div>
+  <div class="grid2">
+    <div class="gc" style="border-color:#1E3A5F">
+      <div class="gc-l" style="color:#60A5FA">● PRIMARY — East US</div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+        <div style="background:#0A1020;border:1px solid #1E2D40;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 1</span>Frontend / AKS — <span style="color:#6EE7B7">5 pods</span></div>
+        <div style="background:#0A1020;border:1px solid #1E2D40;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 2</span>API / Microservices — <span style="color:#6EE7B7">5 pods</span></div>
+        <div style="background:#0A1020;border:1px solid #1E2D40;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 3</span>SQL Primary (R/W) — <span style="color:#6EE7B7">active</span></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#475569">RTO: &lt;90s · RPO: &lt;5s</div>
+    </div>
+    <div class="gc" style="border-color:#14532D">
+      <div class="gc-l" style="color:#6EE7B7">○ DR — West Europe</div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+        <div style="background:#071A10;border:1px solid #14311A;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 1</span>Frontend / AKS — <span style="color:#FCD34D">2 pods (warm)</span></div>
+        <div style="background:#071A10;border:1px solid #14311A;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 2</span>API / Microservices — <span style="color:#FCD34D">2 pods (warm)</span></div>
+        <div style="background:#071A10;border:1px solid #14311A;border-radius:6px;padding:8px 12px;font-size:12px"><span style="color:#475569;font-size:10px;display:block;margin-bottom:2px">TIER 3</span>SQL Replica — <span style="color:#60A5FA">replicating</span></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#475569">Scales to 5+ pods on failover via HPA</div>
+    </div>
+  </div>
+
+  <div class="sec-label">What sits in between</div>
+  <div class="gc" style="margin-bottom:16px;border-color:#3B0764">
+    <div class="gc-l" style="color:#C4B5FD">Azure Front Door — Global Traffic Router</div>
+    <div class="gc-v" style="font-size:13px;font-weight:400;color:#94A3B8;margin-top:6px">Single DNS entry point <code style="color:#C4B5FD;background:#120A20;padding:1px 6px;border-radius:4px">app.company.com</code> → anycast to nearest PoP → forwards to primary (priority=1) or DR (priority=2). Health probes every 30s. 2 failures → DNS flips. No deployment, no kubectl, no human.</div>
+  </div>
+
+  <div class="sec-label">Async DB replication — always running</div>
+  <pre><span class="c"># Every write on primary streams to DR replica continuously</span>
+<span class="c"># Lag: typically 1–5 seconds</span>
+<span class="c"># Your app NEVER connects to the server name directly:</span>
+
+<span class="kw">WRONG</span>: Server=sql-app-primary.eastus.database.windows.net
+<span class="kw">RIGHT</span>: Server=fog-myapp.database.windows.net  <span class="c">← virtual FOG endpoint</span>
+
+<span class="c"># fog-myapp.database.windows.net always points to current PRIMARY</span>
+<span class="c"># When DR is promoted → same hostname → DR SQL</span>
+<span class="c"># Your app reconnects with zero config change</span><div class="lang-label">config</div></pre>
+</div>
+
+<!-- PANE 2 — TRIGGER CHAIN -->
+<div class="pane" id="p2">
+  <div class="info-box">Every signal below fires independently and in parallel. Nothing waits for a human. The chain completes in 63–120 seconds from first failure.</div>
+
+  <div class="chain">
+
+    <div class="cstep">
+      <div class="cnum cn-r">1</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=0s</span><span class="badge bd-afd">Azure Front Door</span><span class="badge bd-auto">Automatic</span></div>
+        <div class="ctitle">Primary /health endpoint stops responding</div>
+        <div class="cdesc">Your app crashes, AKS node fails, network drops — any of these cause /health to return no response or 5xx. Front Door's probe from its global PoPs gets no 200.</div>
+        <pre><span class="c"># What Front Door sees at T=0</span>
+GET https://app-primary.eastus.azurecontainer.io/health
+→ Connection timeout / HTTP 503
+
+<span class="c"># Front Door records probe as FAILED for this sample</span>
+<span class="c"># (needs 2 failures out of 4 samples to trigger)</span><div class="lang-label">http</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-a">2</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=30s</span><span class="badge bd-afd">Azure Front Door</span><span class="badge bd-auto">Automatic</span></div>
+        <div class="ctitle">Second probe fails — unhealthy threshold crossed</div>
+        <div class="cdesc">Front Door probes every 30 seconds. On second failure (2/4 samples failed = threshold), it marks primary backend UNHEALTHY and begins routing decision.</div>
+        <pre><span class="c"># Front Door health state machine:</span>
+<span class="prop">sample_size</span> = <span class="num">4</span>
+<span class="prop">successful_samples_required</span> = <span class="num">2</span>
+<span class="c"># State: 2 failures → backend.healthState = "Unhealthy"</span>
+<span class="c"># Front Door logs this in Azure Monitor automatically</span><div class="lang-label">config</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-r">3</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=62s</span><span class="badge" style="background:#0A1020;border-color:#1E3A5F;color:#60A5FA">Front Door DNS</span><span class="badge bd-auto">Automatic — zero human</span></div>
+        <div class="ctitle">DNS anycast flips — all traffic reroutes to DR</div>
+        <div class="cdesc">Front Door stops sending requests to primary. All new DNS resolutions return DR backend IP. Existing connections drain. This is pure DNS — no deployment, no kubectl, no human.</div>
+        <pre><span class="c"># Before failover — Front Door routing table:</span>
+priority=<span class="num">1</span>  app-primary.eastus   → <span class="kw">UNHEALTHY</span> → SKIP
+priority=<span class="num">2</span>  app-dr.westeurope    → <span class="s">HEALTHY</span>   → USE
+
+<span class="c"># After DNS flip — users hitting app.company.com</span>
+<span class="c"># now reach West Europe automatically</span>
+<span class="c"># DNS TTL = 60s (existing clients reconnect within 60s)</span><div class="lang-label">routing</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-p">4</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=65s</span><span class="badge bd-sql">Azure SQL</span><span class="badge bd-auto">Automatic — zero human</span></div>
+        <div class="ctitle">SQL Failover Group promotes DR replica to primary</div>
+        <div class="cdesc">Separate from Front Door — Azure SQL's own internal heartbeat detects primary SQL is unreachable. After grace_minutes=1, it auto-promotes the DR read-replica to a writable primary.</div>
+        <pre><span class="c"># Azure SQL Failover Group internal heartbeat:</span>
+<span class="c"># Primary SQL heartbeat stops → grace_minutes = 1</span>
+<span class="c"># After 1 min: DR replica promoted to PRIMARY (read-write)</span>
+
+fog-myapp.database.windows.net DNS → DR SQL server
+
+<span class="c"># App connection string NEVER changes</span>
+<span class="c"># App reconnects → hits DR SQL automatically</span><div class="lang-label">sql</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-a">5</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=65s</span><span class="badge" style="background:#1C1208;border-color:#78350F;color:#FCD34D">Azure Monitor</span><span class="badge bd-auto">Automatic</span></div>
+        <div class="ctitle">Azure Monitor alert fires → webhook triggers Automation Runbook</div>
+        <div class="cdesc">Azure Monitor detects Front Door backend health change. Alert rule matches → Action Group fires → Runbook webhook called. No human involved, no pipeline, no approval gate.</div>
+        <pre><span class="c"># Alert fires because:</span>
+Metric: FrontdoorBackendHealthPercentage
+Condition: &lt; <span class="num">100</span> for primary backend for <span class="num">1</span> minute
+Severity: Critical
+Action: Webhook → Automation Runbook URL<div class="lang-label">monitor</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-teal">6</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=70s</span><span class="badge bd-run">Azure Automation</span><span class="badge bd-auto">Automatic — Managed Identity</span></div>
+        <div class="ctitle">Runbook scales DR AKS — pods go from 2 → 10</div>
+        <div class="cdesc">The Automation Runbook authenticates using az login --identity (Managed Identity — no password). It has Contributor on DR resource group only. Scales node pool and bumps HPA min-replicas.</div>
+        <pre><span class="c"># Runbook authenticates with NO password:</span>
+az login <span class="kw">--identity</span>
+
+<span class="c"># Scale DR node pool</span>
+az aks scale --resource-group rg-myapp-dr \
+  --name aks-myapp-dr --node-count <span class="num">5</span>
+
+<span class="c"># Bump HPA minimum replicas</span>
+kubectl patch hpa frontend-hpa -n production \
+  -p <span class="s">'{"spec":{"minReplicas":5}}'</span><div class="lang-label">bash</div></pre>
+      </div>
+    </div>
+
+    <div class="cstep">
+      <div class="cnum cn-g">7</div>
+      <div class="cbody">
+        <div class="cbadges"><span class="badge bd-time">T=90s</span><span class="badge bd-auto">Complete</span><span class="badge" style="background:#071518;border-color:#134E4A;color:#5EEAD4">Human informed — not needed</span></div>
+        <div class="ctitle">DR fully live — Slack notified, humans informed</div>
+        <div class="cdesc">Runbook posts to Slack and triggers PagerDuty. Human gets a message saying "failover complete, traffic on DR, RTO achieved". They are being INFORMED — not asked to do anything.</div>
+        <pre><span class="c"># Final Runbook step — notify team:</span>
+curl -X POST <span class="prop">$SLACK_WEBHOOK</span> \
+  -d <span class="s">'{"text":"✅ FAILOVER COMPLETE. DR West Europe LIVE.\nRTO: ~90s. DB promoted. 3 tiers healthy.\nNo action needed."}'</span><div class="lang-label">bash</div></pre>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="sec-label">Timeline summary</div>
+  <table class="tl-table">
+    <tr><th>Time</th><th>What happens</th><th>Who does it</th></tr>
+    <tr><td class="tl-time" style="color:#FCA5A5">T=0s</td><td>Primary /health stops responding</td><td><span class="chip chip-none">—</span></td></tr>
+    <tr><td class="tl-time" style="color:#FCD34D">T=30s</td><td>Front Door probe #1 fails</td><td><span class="chip chip-az">Azure automatic</span></td></tr>
+    <tr><td class="tl-time" style="color:#FCD34D">T=60s</td><td>Probe #2 fails — threshold crossed</td><td><span class="chip chip-az">Azure automatic</span></td></tr>
+    <tr><td class="tl-time" style="color:#60A5FA">T=62s</td><td>DNS flips to DR backend</td><td><span class="chip chip-az">Front Door</span></td></tr>
+    <tr><td class="tl-time" style="color:#C4B5FD">T=65s</td><td>SQL Failover Group promotes DR replica</td><td><span class="chip chip-az">Azure SQL</span></td></tr>
+    <tr><td class="tl-time" style="color:#5EEAD4">T=70s</td><td>Runbook fires — scales DR pods</td><td><span class="chip chip-auto">Auto Runbook</span></td></tr>
+    <tr><td class="tl-time" style="color:#6EE7B7">T=90s</td><td>All 3 tiers live in West Europe</td><td><span class="chip chip-done">Complete</span></td></tr>
+    <tr><td class="tl-time" style="color:#6EE7B7">T=95s</td><td>Slack notification sent</td><td><span class="chip chip-auto">Human informed</span></td></tr>
+  </table>
+  <div class="ok-box"><strong>RTO: ~90 seconds · RPO: ~5 seconds · Human steps during failover: zero</strong></div>
+</div>
+
+<!-- PANE 3 — HEALTH TRAP -->
+<div class="pane" id="p3">
+  <div class="danger-box"><strong>Critical:</strong> The entire DR system depends on one piece of code your team writes. If you get this wrong, Front Door will never trigger failover — even when your app is completely broken.</div>
+
+  <div class="sec-label">The wrong way — DR never triggers</div>
+  <pre><span class="c">// ❌ WRONG — always returns 200, even when DB is down</span>
+app.<span class="fn">get</span>(<span class="s">'/health'</span>, (req, res) => {
+  res.<span class="fn">status</span>(<span class="num">200</span>).<span class="fn">json</span>({ <span class="prop">status</span>: <span class="s">'healthy'</span> });
+  <span class="c">// Front Door sees 200 → thinks all is fine → DR never triggers</span>
+  <span class="c">// Your app is dead but Front Door doesn't know</span>
+});<div class="lang-label">javascript</div></pre>
+
+  <div class="sec-label">The right way — Node.js / Express</div>
+  <pre><span class="c">// ✅ CORRECT — tests real dependencies</span>
+app.<span class="fn">get</span>(<span class="s">'/health'</span>, <span class="k">async</span> (req, res) => {
+  <span class="k">try</span> {
+    <span class="k">await</span> db.<span class="fn">query</span>(<span class="s">'SELECT 1'</span>);        <span class="c">// real DB check</span>
+    <span class="k">await</span> redis.<span class="fn">ping</span>();                <span class="c">// real cache check</span>
+    res.<span class="fn">status</span>(<span class="num">200</span>).<span class="fn">json</span>({
+      <span class="prop">status</span>: <span class="s">'healthy'</span>,
+      <span class="prop">region</span>: process.env.<span class="prop">REGION</span>     <span class="c">// "eastus" or "westeurope"</span>
+    });
+  } <span class="k">catch</span> (err) {
+    res.<span class="fn">status</span>(<span class="num">503</span>).<span class="fn">json</span>({            <span class="c">// 503 → Front Door triggers failover</span>
+      <span class="prop">status</span>: <span class="s">'unhealthy'</span>,
+      <span class="prop">error</span>: err.message
+    });
+  }
+});<div class="lang-label">javascript</div></pre>
+
+  <div class="sec-label">Same logic — Python (Flask / FastAPI)</div>
+  <pre><span class="c"># ✅ Python version — same concept</span>
+<span class="kw">@app</span>.route(<span class="s">'/health'</span>)
+<span class="k">def</span> <span class="fn">health</span>():
+    <span class="k">try</span>:
+        db.execute(<span class="s">'SELECT 1'</span>)
+        redis_client.ping()
+        <span class="k">return</span> jsonify({<span class="s">"status"</span>:<span class="s">"healthy"</span>,<span class="s">"region"</span>:os.getenv(<span class="s">"REGION"</span>)}), <span class="num">200</span>
+    <span class="k">except</span> Exception <span class="k">as</span> e:
+        <span class="k">return</span> jsonify({<span class="s">"status"</span>:<span class="s">"unhealthy"</span>,<span class="s">"error"</span>:<span class="fn">str</span>(e)}), <span class="num">503</span><div class="lang-label">python</div></pre>
+
+  <div class="sec-label">Kubernetes liveness + readiness probes — link to AKS</div>
+  <pre><span class="c"># k8s/base/frontend-deploy.yaml</span>
+livenessProbe:
+  httpGet:
+    <span class="prop">path</span>: /health
+    <span class="prop">port</span>: <span class="num">8080</span>
+  initialDelaySeconds: <span class="num">15</span>
+  periodSeconds: <span class="num">20</span>
+  failureThreshold: <span class="num">3</span>   <span class="c"># 3 failures → pod restarted</span>
+
+readinessProbe:
+  httpGet:
+    <span class="prop">path</span>: /health
+    <span class="prop">port</span>: <span class="num">8080</span>
+  initialDelaySeconds: <span class="num">5</span>
+  periodSeconds: <span class="num">10</span>    <span class="c"># 10s check — faster than Front Door's 30s</span><div class="lang-label">yaml</div></pre>
+
+  <div class="warn-box"><strong>Rule:</strong> /health must return 503 when the DB is unreachable, when Redis is down, or when any critical dependency fails. If it returns 200 in any of those cases — your DR system is theater.</div>
+</div>
+
+<!-- PANE 4 — TERRAFORM + CICD -->
+<div class="pane" id="p4">
+  <div class="info-box">Two completely separate paths: planned deploys go through CI/CD with approval gates. Emergency failover bypasses CI/CD entirely — it uses Azure-native automation that runs independently of any pipeline.</div>
+
+  <div class="sec-label">Terraform folder structure</div>
+  <pre><span class="prop">infra/</span>
+├── <span class="prop">modules/</span>           <span class="c"># shared — written once, used by both regions</span>
+│   ├── aks/
+│   ├── sql/
+│   ├── frontdoor/
+│   └── automation/    <span class="c"># runbook + managed identity + RBAC</span>
+└── <span class="prop">envs/</span>
+    ├── <span class="prop">primary/</span>       <span class="c"># East US</span>
+    │   ├── main.tf
+    │   └── primary.auto.tfvars
+    └── <span class="prop">dr/</span>            <span class="c"># West Europe — only 3 vars differ</span>
+        ├── main.tf
+        └── dr.auto.tfvars<div class="lang-label">tree</div></pre>
+
+  <div class="sec-label">dr.auto.tfvars — only these 3 lines differ from primary</div>
+  <pre><span class="prop">location</span>            = <span class="s">"westeurope"</span>
+<span class="prop">node_count</span>          = <span class="num">2</span>        <span class="c"># warm standby — HPA scales on failover</span>
+<span class="prop">is_primary</span>          = <span class="k">false</span>   <span class="c"># SQL replica, not primary</span>
+
+<span class="c"># Everything else (VNet, AKS version, monitoring, tags) = identical to primary</span><div class="lang-label">hcl</div></pre>
+
+  <div class="sec-label">SQL Failover Group — Terraform (key resource)</div>
+  <pre><span class="k">resource</span> <span class="s">"azurerm_sql_failover_group"</span> <span class="s">"main"</span> {
+  <span class="prop">name</span>                = <span class="s">"fog-myapp"</span>
+  <span class="prop">resource_group_name</span> = var.primary_rg
+  <span class="prop">server_name</span>         = module.sql.server_name
+  <span class="prop">databases</span>           = [module.sql.database_id]
+
+  <span class="prop">partner_servers</span> {
+    <span class="prop">id</span> = var.dr_sql_server_id
+  }
+  <span class="prop">read_write_endpoint_failover_policy</span> {
+    <span class="prop">mode</span>          = <span class="s">"Automatic"</span>
+    <span class="prop">grace_minutes</span> = <span class="num">1</span>    <span class="c"># 1 min heartbeat loss → auto-promote DR</span>
+  }
+}<div class="lang-label">hcl</div></pre>
+
+  <div class="sec-label">Azure DevOps CI pipeline — build + push</div>
+  <pre><span class="c"># pipelines/app-ci.yml</span>
+<span class="prop">trigger</span>:
+  <span class="prop">branches</span>: { <span class="prop">include</span>: [main] }
+
+<span class="prop">stages</span>:
+- <span class="prop">stage</span>: Test
+  <span class="prop">jobs</span>:
+  - <span class="prop">job</span>: UnitTests
+    <span class="prop">steps</span>:
+    - script: npm test
+    - script: npm run integration-test
+
+- <span class="prop">stage</span>: BuildPush
+  <span class="prop">dependsOn</span>: Test
+  <span class="prop">jobs</span>:
+  - <span class="prop">job</span>: Docker
+    <span class="prop">steps</span>:
+    - task: AzureCLI@2
+      <span class="prop">inputs</span>:
+        <span class="prop">azureSubscription</span>: <span class="s">'sc-myapp-azure'</span>
+        <span class="prop">scriptLocation</span>: inlineScript
+        <span class="prop">inlineScript</span>: |
+          docker build -t acrmyapp.azurecr.io/frontend:<span class="prop">$(Build.BuildId)</span> .
+          docker push acrmyapp.azurecr.io/frontend:<span class="prop">$(Build.BuildId)</span>
+          <span class="c"># Update k8s manifest — ArgoCD picks this up automatically</span>
+          sed -i <span class="s">"s|image:.*|image: acrmyapp.azurecr.io/frontend:$(Build.BuildId)|"</span> \
+            k8s/base/frontend-deploy.yaml
+          git commit -am <span class="s">"ci: image tag $(Build.BuildId) [skip ci]"</span>
+          git push<div class="lang-label">yaml</div></pre>
+
+  <div class="sec-label">ArgoCD ApplicationSet — one definition, both clusters</div>
+  <pre><span class="prop">generators</span>:
+- <span class="prop">list</span>:
+    <span class="prop">elements</span>:
+    - <span class="prop">cluster</span>: primary-eastus
+      <span class="prop">overlay</span>: primary
+      <span class="prop">replicas</span>: <span class="s">"5"</span>
+    - <span class="prop">cluster</span>: dr-westeurope
+      <span class="prop">overlay</span>: dr
+      <span class="prop">replicas</span>: <span class="s">"2"</span>   <span class="c"># warm standby</span>
+
+<span class="prop">syncPolicy</span>:
+  <span class="prop">automated</span>:
+    <span class="prop">prune</span>: <span class="k">true</span>
+    <span class="prop">selfHeal</span>: <span class="k">true</span>   <span class="c"># reverts manual kubectl changes automatically</span><div class="lang-label">yaml</div></pre>
+
+  <div class="ok-box">Planned deploy path: git push → CI builds → ArgoCD syncs both clusters → CD verifies health → done. Failover path: Azure automation only — CI/CD not involved.</div>
+</div>
+
+<!-- PANE 5 — PERMISSIONS -->
+<div class="pane" id="p5">
+  <div class="info-box">Zero-human automation requires the right non-human identity with minimal permissions. No shared passwords. No hardcoded secrets. Everything uses Managed Identity or Service Principal scoped to least privilege.</div>
+
+  <div class="sec-label">Permission map</div>
+  <table>
+    <tr><th>Identity</th><th>Role</th><th>Scope</th><th>Why</th></tr>
+    <tr><td>Automation Runbook MSI</td><td><span style="color:#6EE7B7">Contributor</span></td><td>rg-myapp-dr only</td><td>Scale AKS, patch HPA</td></tr>
+    <tr><td>Automation Runbook MSI</td><td><span style="color:#60A5FA">Reader</span></td><td>rg-myapp-primary</td><td>Check primary status</td></tr>
+    <tr><td>AKS Kubelet Identity</td><td><span style="color:#6EE7B7">AcrPull</span></td><td>acrmyapp001</td><td>Pull container images</td></tr>
+    <tr><td>AKS Kubelet Identity</td><td><span style="color:#6EE7B7">KV Secrets User</span></td><td>kv-myapp-global</td><td>Read DB passwords</td></tr>
+    <tr><td>Azure DevOps SP</td><td><span style="color:#FCD34D">Contributor</span></td><td>Subscription</td><td>Terraform apply</td></tr>
+    <tr><td>Front Door</td><td><span style="color:#475569">Platform-managed</span></td><td>Built-in</td><td>DNS routing — no RBAC needed</td></tr>
+    <tr><td>SQL Failover Group</td><td><span style="color:#475569">Platform-managed</span></td><td>Built-in</td><td>DB promotion — no RBAC needed</td></tr>
+  </table>
+
+  <div class="sec-label">Create Automation Account + Managed Identity (Terraform)</div>
+  <pre><span class="k">resource</span> <span class="s">"azurerm_automation_account"</span> <span class="s">"dr"</span> {
+  <span class="prop">name</span>                = <span class="s">"aa-myapp-dr-failover"</span>
+  <span class="prop">resource_group_name</span> = var.primary_rg
+  <span class="prop">sku_name</span>            = <span class="s">"Basic"</span>
+
+  <span class="prop">identity</span> {
+    <span class="prop">type</span> = <span class="s">"SystemAssigned"</span>   <span class="c"># Managed Identity — zero passwords</span>
+  }
+}
+
+<span class="k">resource</span> <span class="s">"azurerm_role_assignment"</span> <span class="s">"runbook_dr"</span> {
+  <span class="prop">scope</span>                = <span class="s">"/subscriptions/${var.sub_id}/resourceGroups/${var.dr_rg}"</span>
+  <span class="prop">role_definition_name</span> = <span class="s">"Contributor"</span>
+  <span class="prop">principal_id</span>         = azurerm_automation_account.dr.identity[<span class="num">0</span>].principal_id
+  <span class="c"># Only DR resource group — not entire subscription</span>
+}<div class="lang-label">hcl</div></pre>
+
+  <div class="warn-box"><strong>Critical:</strong> The Runbook uses <code>az login --identity</code> inside the script. No clientSecret ever appears in code, pipeline YAML, or git. The Managed Identity is the credential — managed entirely by Azure and Terraform.</div>
+</div>
+
+<!-- PANE 6 — FAILBACK -->
+<div class="pane" id="p6">
+  <div class="warn-box"><strong>Failover is 100% automatic. Failback is intentionally manual.</strong> During the failover window, your DR database was accepting writes. Those writes must replicate back to primary before you switch back. Automated failback risks data loss.</div>
+
+  <div class="sec-label">Why failback must be human-triggered</div>
+  <div class="grid2">
+    <div class="gc"><div class="gc-l">Risk without verification</div><div class="gc-v" style="color:#EF4444">Stale data</div><div class="gc-sub">Primary restarts with data from before the outage. DR writes are lost.</div></div>
+    <div class="gc"><div class="gc-l">Safe failback window</div><div class="gc-v" style="color:#10B981">2–5 minutes</div><div class="gc-sub">Time needed for SQL to replicate DR writes back to primary.</div></div>
+  </div>
+
+  <div class="sec-label">Failback pipeline — manual trigger, approval gate</div>
+  <pre><span class="c"># Step 1: Verify primary is stable (10 checks over 5 minutes)</span>
+<span class="k">for</span> i in {1..10}; <span class="k">do</span>
+  CODE=$(curl -s -o /dev/null -w <span class="s">"%{http_code}"</span> \
+    https://app-primary.eastus.azurecontainer.io/health)
+  <span class="k">if</span> [ <span class="s">"$CODE"</span> != <span class="s">"200"</span> ]; <span class="k">then</span> exit <span class="num">1</span>; <span class="k">fi</span>
+  sleep <span class="num">30</span>
+<span class="k">done</span>
+
+<span class="c"># Step 2: Re-enable primary in Front Door (it auto-recovers when healthy)</span>
+az afd origin update --enabled-state Enabled ...
+
+<span class="c"># Step 3: Wait for SQL replication DR → Primary to sync</span>
+sleep <span class="num">120</span>
+
+<span class="c"># Step 4: Failback SQL to original primary</span>
+az sql failover-group set-primary \
+  --name fog-myapp \
+  --resource-group rg-myapp-primary \
+  --server sql-myapp-primary
+
+<span class="c"># Step 5: Scale DR back to warm standby</span>
+az aks scale --resource-group rg-myapp-dr \
+  --name aks-myapp-dr --node-count <span class="num">2</span><div class="lang-label">bash</div></pre>
+
+  <div class="ok-box">Front Door automatically routes back to primary (priority=1 is always preferred over priority=2) as soon as primary health probes pass again. You just need to fix the DB and scale DR back down.</div>
+</div>
+
+<!-- PANE 7 — LESSONS -->
+<div class="pane" id="p7">
+  <div class="sec-label">3 things I wish I knew before building this</div>
+
+  <div class="chain">
+    <div class="cstep">
+      <div class="cnum cn-r">!</div>
+      <div class="cbody">
+        <div class="ctitle">Untested DR = no DR</div>
+        <div class="cdesc">The architecture means nothing until you've run the drill. Disable the primary backend in Front Door. Watch /health flip from "eastus" to "westeurope". Measure the time. That number is your real RTO. Do this quarterly.</div>
+        <pre><span class="c"># Drill command — no real outage</span>
+az afd origin update --enabled-state Disabled ...
+watch -n5 <span class="s">'curl -s https://app.company.com/health | python3 -c "import sys,json; print(json.load(sys.stdin)[\"region\"])"'</span><div class="lang-label">bash</div></pre>
+      </div>
+    </div>
+    <div class="cstep">
+      <div class="cnum cn-a">!</div>
+      <div class="cbody">
+        <div class="ctitle">The connection string is a hidden dependency</div>
+        <div class="cdesc">If your app connects to sql-primary.eastus.database.windows.net — the SQL failover group promotes DR perfectly, but your app still tries to hit a dead server. Always use the virtual failover group endpoint. Always.</div>
+        <pre><span class="kw">WRONG</span>: sql-myapp-primary.eastus.database.windows.net
+<span class="s">RIGHT</span>:  fog-myapp.database.windows.net<div class="lang-label">config</div></pre>
+      </div>
+    </div>
+    <div class="cstep">
+      <div class="cnum cn-g">✓</div>
+      <div class="cbody">
+        <div class="ctitle">Warm standby costs less than you think</div>
+        <div class="cdesc">Running DR at 2 nodes (vs 0) adds ~30% infra cost but cuts failover time from 10–30 minutes (cold start) to under 2 minutes. For production workloads with any SLA, that's an easy trade. The interview question is "what's your RTO?" not "what's your cost?"</div>
+        <div class="grid2">
+          <div class="gc"><div class="gc-l">Cold DR (0 nodes)</div><div class="gc-v" style="color:#EF4444">10–30 min RTO</div><div class="gc-sub">Cheaper. Unacceptable for most SLAs.</div></div>
+          <div class="gc"><div class="gc-l">Warm standby (2 nodes)</div><div class="gc-v" style="color:#10B981">&lt;2 min RTO</div><div class="gc-sub">~30% more cost. Production-grade.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-label">Full stack used</div>
+  <div class="stack">
+    <span class="stag">Azure Front Door</span><span class="stag">AKS</span><span class="stag">Azure SQL Failover Group</span>
+    <span class="stag">Azure Automation (MSI)</span><span class="stag">Azure Monitor</span><span class="stag">Terraform</span>
+    <span class="stag">Terragrunt</span><span class="stag">ArgoCD ApplicationSet</span><span class="stag">Kustomize</span>
+    <span class="stag">Prometheus + Alertmanager</span><span class="stag">Azure DevOps CI/CD</span>
+    <span class="stag">ACR (geo-replicated)</span><span class="stag">Azure Key Vault</span><span class="stag">HPA</span>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<div class="article-footer">
+  <div class="footer-name">Samarjeet Singh</div>
+  <div class="footer-sub">DevOps Engineer · HCLTech · AZ-104 · ITIL Foundation</div>
+  <div class="hashtags">
+    <span class="htag">#DevOps</span><span class="htag">#Azure</span><span class="htag">#Kubernetes</span>
+    <span class="htag">#Terraform</span><span class="htag">#DisasterRecovery</span><span class="htag">#AKS</span>
+    <span class="htag">#GitOps</span><span class="htag">#CloudArchitecture</span><span class="htag">#SRE</span>
+    <span class="htag">#AzureDevOps</span><span class="htag">#ArgoCD</span><span class="htag">#Infrastructure</span>
+  </div>
+</div>
+
+<script>
+const panes=document.querySelectorAll('.pane');
+const tabs=document.querySelectorAll('.tab');
+function sw(i){
+  panes.forEach((p,j)=>p.classList.toggle('on',i===j));
+  tabs.forEach((t,j)=>t.classList.toggle('on',i===j));
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

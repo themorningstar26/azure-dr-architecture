@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: three-tier-app
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: primary-eastus
+        server: https://aks-myapp-primary.hcp.eastus.azmk8s.io
+        overlay: primary
+        replicas: "5"
+      - cluster: dr-westeurope
+        server: https://aks-myapp-dr.hcp.westeurope.azmk8s.io
+        overlay: dr
+        replicas: "2"
+  template:
+    metadata:
+      name: 'app-{{cluster}}'
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: platform-alerts
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/yourorg/azure-dr-architecture
+        targetRevision: main
+        path: k8s/overlays/{{overlay}}
+      destination:
+        server: '{{server}}'
+        namespace: production
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 3
+          backoff:
+            duration: 30s
+            factor: 2

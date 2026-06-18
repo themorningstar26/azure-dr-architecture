@@ -1,0 +1,67 @@
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include: [infra/envs/primary/**, infra/modules/**]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  TF_VERSION: '1.6.6'
+  WORKING_DIR: infra/envs/primary
+
+stages:
+- stage: Plan
+  jobs:
+  - job: TFPlan
+    steps:
+    - task: AzureKeyVault@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        KeyVaultName: 'kv-myapp-global'
+        SecretsFilter: 'SP-CLIENT-ID,SP-CLIENT-SECRET,SP-TENANT-ID,DB-ADMIN-PASSWORD'
+
+    - script: |
+        wget -q https://releases.hashicorp.com/terraform/$(TF_VERSION)/terraform_$(TF_VERSION)_linux_amd64.zip
+        unzip -q terraform_*.zip && sudo mv terraform /usr/local/bin/
+      displayName: Install Terraform
+
+    - script: terraform init -backend-config=backend.hcl
+      workingDirectory: $(WORKING_DIR)
+      env:
+        ARM_CLIENT_ID: $(SP-CLIENT-ID)
+        ARM_CLIENT_SECRET: $(SP-CLIENT-SECRET)
+        ARM_TENANT_ID: $(SP-TENANT-ID)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+
+    - script: terraform plan -var-file=primary.auto.tfvars -var="db_admin_password=$(DB-ADMIN-PASSWORD)" -out=tfplan
+      workingDirectory: $(WORKING_DIR)
+      env:
+        ARM_CLIENT_ID: $(SP-CLIENT-ID)
+        ARM_CLIENT_SECRET: $(SP-CLIENT-SECRET)
+        ARM_TENANT_ID: $(SP-TENANT-ID)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+
+    - publish: $(WORKING_DIR)/tfplan
+      artifact: tfplan-primary
+
+- stage: Apply
+  dependsOn: Plan
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: TFApply
+    environment: production-infra
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: tfplan-primary
+          - script: terraform apply -auto-approve $(Pipeline.Workspace)/tfplan-primary/tfplan
+            workingDirectory: $(WORKING_DIR)
+            env:
+              ARM_CLIENT_ID: $(SP-CLIENT-ID)
+              ARM_CLIENT_SECRET: $(SP-CLIENT-SECRET)
+              ARM_TENANT_ID: $(SP-TENANT-ID)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)

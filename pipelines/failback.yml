@@ -1,0 +1,81 @@
+trigger: none  # MANUAL ONLY — never triggered automatically
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: VerifyPrimaryRecovered
+  displayName: Verify Primary Stable (10 checks x 30s)
+  jobs:
+  - job: HealthChecks
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          echo "Running 10 consecutive health checks — primary must pass ALL of them"
+          for i in {1..10}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" https://app-primary.eastus.azurecontainer.io/health)
+            echo "Check $i/10: HTTP $CODE"
+            if [ "$CODE" != "200" ]; then
+              echo "Primary NOT stable at check $i. Aborting failback."
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "Primary passed all 10 checks. Ready for failback."
+
+- stage: ApprovalGate
+  displayName: Manual Approval Required
+  dependsOn: VerifyPrimaryRecovered
+  jobs:
+  - deployment: WaitApproval
+    environment: failback-approval
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: echo "Approval received. Proceeding with failback."
+
+- stage: Failback
+  displayName: Execute Failback
+  dependsOn: ApprovalGate
+  jobs:
+  - job: SwitchBack
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          echo "Step 1: Re-enable primary in Front Door"
+          az afd origin update \
+            --profile-name afd-myapp-global \
+            --resource-group rg-myapp-primary \
+            --origin-group-name app-origin-group \
+            --origin-name primary-east-us \
+            --enabled-state Enabled
+
+          echo "Step 2: Wait for SQL DR->Primary replication to catch up (2 min)"
+          sleep 120
+
+          echo "Step 3: Failback SQL to original primary"
+          az sql failover-group set-primary \
+            --name fog-myapp \
+            --resource-group rg-myapp-primary \
+            --server sql-myapp-primary
+
+          echo "Step 4: Scale DR back to warm standby"
+          az aks scale --resource-group rg-myapp-dr --name aks-myapp-dr --node-count 2
+          az aks get-credentials --resource-group rg-myapp-dr --name aks-myapp-dr --alias dr
+          kubectl patch hpa frontend-hpa -n production --context dr -p '{"spec":{"minReplicas":2}}'
+          kubectl patch hpa api-hpa     -n production --context dr -p '{"spec":{"minReplicas":2}}'
+
+          echo "Step 5: Verify traffic back on primary"
+          sleep 90
+          REGION=$(curl -s https://app.yourcompany.com/health | python3 -c "import sys,json; print(json.load(sys.stdin)['region'])")
+          echo "Traffic now on: $REGION"
+          echo "Failback complete"

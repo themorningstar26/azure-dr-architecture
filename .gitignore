@@ -1,0 +1,32 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+*.tfvars.backup
+
+# Secrets — NEVER commit these
+*.pem
+*.key
+*.env
+.env*
+secrets/
+*secret*
+*password*
+*credential*
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Pipeline artifacts
+drop/

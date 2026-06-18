@@ -1,0 +1,97 @@
+trigger: none
+resources:
+  pipelines:
+  - pipeline: ci
+    source: app-ci
+    trigger:
+      branches: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: PreCheck
+  displayName: Check Primary Health
+  jobs:
+  - job: HealthCheck
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          HEALTH=$(az afd origin show \
+            --profile-name afd-myapp-global \
+            --resource-group rg-myapp-primary \
+            --origin-group-name app-origin-group \
+            --origin-name primary-east-us \
+            --query "enabledState" -o tsv)
+          if [[ "$HEALTH" == "Disabled" ]]; then
+            echo "##vso[task.logissue type=warning]Primary in failover mode. Skipping deploy."
+            echo "##vso[task.setvariable variable=SKIP_DEPLOY]true"
+          fi
+
+- stage: DeployPrimary
+  displayName: Deploy to Primary (East US)
+  dependsOn: PreCheck
+  condition: and(succeeded(), ne(variables['SKIP_DEPLOY'], 'true'))
+  jobs:
+  - deployment: Deploy
+    environment: production-primary
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: 'sc-myapp-azure'
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az aks get-credentials --resource-group rg-myapp-primary --name aks-myapp-primary
+                kubectl rollout status deployment/frontend -n production --timeout=300s
+                kubectl rollout status deployment/api -n production --timeout=300s
+                INGRESS=$(kubectl get svc frontend-svc -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                curl -f http://$INGRESS/health || exit 1
+                echo "Primary deploy verified"
+
+- stage: VerifyDR
+  displayName: Verify DR in Sync
+  dependsOn: DeployPrimary
+  condition: succeeded()
+  jobs:
+  - job: VerifyDR
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az aks get-credentials --resource-group rg-myapp-dr --name aks-myapp-dr --alias dr
+          kubectl rollout status deployment/frontend -n production --context dr --timeout=300s
+          DR_IP=$(kubectl get svc frontend-svc -n production --context dr -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://$DR_IP/health)
+          if [ "$HTTP" != "200" ]; then echo "DR health check FAILED: $HTTP"; exit 1; fi
+          echo "DR verified healthy"
+
+- stage: VerifyFrontDoor
+  displayName: Verify Global Routing
+  dependsOn: VerifyDR
+  condition: succeeded()
+  jobs:
+  - job: FDCheck
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'sc-myapp-azure'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" https://app.yourcompany.com/health)
+          if [ "$HTTP" != "200" ]; then echo "Front Door check FAILED"; exit 1; fi
+          REGION=$(curl -s https://app.yourcompany.com/health | python3 -c "import sys,json; print(json.load(sys.stdin)['region'])")
+          echo "Traffic on region: $REGION"
+          curl -X POST $SLACK_WEBHOOK -H 'Content-type: application/json' \
+            -d "{\"text\":\"Deploy complete. Both regions healthy. Region: $REGION\"}"
